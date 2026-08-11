@@ -2,6 +2,8 @@ package com.tencent.ghproxy
 
 import android.annotation.SuppressLint
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.View
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -9,6 +11,8 @@ import android.webkit.WebViewClient
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import com.chaquo.python.Python
+import com.chaquo.python.android.AndroidPlatform
 import java.net.Inet4Address
 import java.net.NetworkInterface
 
@@ -17,14 +21,15 @@ import java.net.NetworkInterface
  *   - 顶部状态栏：展示手机局域网 IP + 端口（电脑访问用）
  *   - WebView：加载本地 Python 代理服务首页 http://127.0.0.1:8080/
  *
- * Python 代理服务由 Chaquopy (PyApplication.onCreate -> app_main.start_server) 在
- * Activity 创建前已自动启动，无需在 Kotlin 端手动调用。
+ * Python 代理服务在此处显式启动（而非依赖 PyApplication 自动启动），
+ * 以便捕获启动异常并展示错误信息（避免直接闪退）。
  */
 class MainActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
     private lateinit var statusBar: TextView
     private val baseUrl = "http://127.0.0.1:8080"
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -49,13 +54,38 @@ class MainActivity : AppCompatActivity() {
         webView.setBackgroundColor(ContextCompat.getColor(this, R.color.bg))
         webView.webViewClient = WebViewClient()
 
-        // 启动时若 Python 服务尚未就绪，先显示提示页；加载失败则定时重试
+        // 后台线程启动 Python 代理服务（阻塞式），失败则在状态栏提示而非闪退
+        startPythonServer()
+    }
+
+    /**
+     * 在后台线程启动 Python 代理服务。
+     * Chaquopy Python.start() 仅需一次；之后 app_main.start_server() 阻塞运行 uvicorn。
+     */
+    private fun startPythonServer() {
+        Thread {
+            try {
+                if (!Python.isStarted()) {
+                    Python.start(AndroidPlatform(applicationContext))
+                }
+                Python.getInstance().getModule("app_main").callAttr("start_server")
+            } catch (t: Throwable) {
+                t.printStackTrace()
+                mainHandler.post {
+                    statusBar.text = getString(R.string.server_error, t.message ?: "unknown")
+                }
+            }
+        }.apply {
+            name = "ghproxy-server"
+            start()
+        }
+        // UI 先行加载，Python 服务稍后就绪（秒级）
         loadHomeWithRetry()
     }
 
-    private fun loadHomeWithRetry(retryLeft: Int = 10) {
+    private fun loadHomeWithRetry(retryLeft: Int = 15) {
         webView.loadUrl(baseUrl)
-        // 简易重试：3 秒后检查是否仍是白屏（Python 启动可能稍慢）
+        // 简易重试：Python 服务启动通常需 1~3 秒；失败时最多重试 15 次（约 45s）
         webView.postDelayed({
             if (retryLeft > 0 && (webView.url == null || webView.url == "about:blank")) {
                 loadHomeWithRetry(retryLeft - 1)
