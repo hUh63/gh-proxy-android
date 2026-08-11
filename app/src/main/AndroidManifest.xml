@@ -8,6 +8,7 @@
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
 
     <application
+        android:name=".App"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
@@ -19,8 +20,6 @@
         android:usesCleartextTraffic="true"
         tools:targetApi="34">
 
-        <!-- 不再使用 PyApplication 自动启动（Python 启动异常会直接闪退）；
-            改为 MainActivity 中显式启动并捕获异常 -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
