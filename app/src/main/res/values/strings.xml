@@ -3,4 +3,6 @@
     <string name="app_name">GitHub 加速</string>
     <!-- 占位参数：1=局域网 IP, 2=端口 -->
     <string name="status_template">📡 电脑请访问：http://%1$s:%2$d/  ·  手机内访问：http://127.0.0.1:%2$d/</string>
+    <!-- Python 服务启动失败时的提示 -->
+    <string name="server_error">⚠️ Python 服务启动失败: %1$s</string>
 </resources>
