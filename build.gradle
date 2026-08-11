@@ -1,6 +1,13 @@
 // Top-level build file
-// Chaquopy plugin version must match the Android Gradle Plugin version range (7.3.x ~ 9.2.x)
-plugins {
-    id 'com.android.application' version '8.5.2' apply false
-    id 'com.chaquopy.plugin'     version '17.0.0' apply false
+// Chaquopy 12.0 用 buildscript + classpath 语法（最稳）
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+        maven { url 'https://chaquo.com/maven' }
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.5.2'
+        classpath 'com.chaquo.python:gradle:12.0.0'
+    }
 }

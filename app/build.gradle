@@ -1,7 +1,5 @@
-plugins {
-    id 'com.android.application'
-    id 'com.chaquopy.plugin'
-}
+apply plugin: 'com.android.application'
+apply plugin: 'com.chaquo.python'
 
 android {
     namespace 'com.tencent.ghproxy'
@@ -9,22 +7,31 @@ android {
 
     defaultConfig {
         applicationId "com.tencent.ghproxy"
-        minSdk 24              // Chaquopy minimum
+        minSdk 24
         targetSdk 34
         versionCode 1
         versionName "1.0.0"
 
-        // ABI filters: modern devices (arm64) + emulator (x86_64).
-        // Add 'armeabi-v7a' only with Python 3.11 for very old devices.
+        // ABI filters: modern devices (arm64) + emulator (x86_64)
         ndk {
             abiFilters += ['arm64-v8a', 'x86_64']
+        }
+
+        // Chaquopy Python 配置（嵌入在 android.defaultConfig 内）
+        python {
+            pip {
+                install "fastapi==0.115.0"
+                install "uvicorn[standard]==0.30.6"
+                install "httpx==0.27.2"
+                install "anyio==4.4.0"
+                install "sniffio==1.3.1"
+            }
         }
     }
 
     buildTypes {
         debug {
             minifyEnabled false
-            // Allow debugging the local HTTP proxy from on-device Chrome
             applicationIdSuffix ".debug"
             versionNameSuffix "-debug"
         }
@@ -40,16 +47,19 @@ android {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = '17'
-    }
     buildFeatures {
         viewBinding true
     }
 
     packagingOptions {
-        // Chaquopy native libs may include duplicate files across Python versions
         pickFirst '**/libc++_shared.so'
+    }
+
+    // Chaquopy Python 源码目录
+    sourceSets {
+        main {
+            python.srcDirs = ['src/main/python']
+        }
     }
 }
 
@@ -58,22 +68,4 @@ dependencies {
     implementation 'androidx.appcompat:appcompat:1.7.0'
     implementation 'com.google.android.material:material:1.12.0'
     implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
-}
-
-chaquopy {
-    defaultConfig {
-        version "3.12"             // Chaquopy 17.0 supports 3.10–3.14
-        // Inline the build-time pip log so failures are visible
-        pip {
-            install "fastapi==0.115.0"
-            install "uvicorn[standard]==0.30.6"
-            install "httpx==0.27.2"
-            install "anyio==4.4.0"
-            install "sniffio==1.3.1"
-        }
-        // Reduce build size: skip bytecode compilation for stdlib (faster builds, slightly slower startup)
-        // pyc {
-        //     src false
-        // }
-    }
 }
