@@ -23,10 +23,13 @@ android {
             buildPython "python3.10"
             pip {
                 install "fastapi==0.115.0"
-                install "uvicorn[standard]==0.30.6"
+                // 不安装 uvicorn[standard] —— Chaquopy 12 内置 pip 太老，无法解析 watchfiles 的新 pyproject.toml
+                install "uvicorn==0.30.6"
                 install "httpx==0.27.2"
                 install "anyio==4.4.0"
                 install "sniffio==1.3.1"
+                install "h11==0.14.0"
+                install "click==8.1.7"
             }
         }
     }
