@@ -1,0 +1,15 @@
+# Gradle / Android
+.gradle/
+build/
+local.properties
+*.iml
+.idea/
+captures/
+
+# Python 缓存（Chaquopy 在 build 阶段生成）
+__pycache__/
+*.pyc
+
+# Keystore
+*.jks
+*.keystore

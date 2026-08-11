@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <!-- 不备份 Python 缓存和日志 -->
+        <exclude domain="external" path="."/>
+    </cloud-backup>
+</data-extraction-rules>
