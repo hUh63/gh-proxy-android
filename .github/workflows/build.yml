@@ -34,6 +34,12 @@ jobs:
       - name: Create local.properties
         run: echo "sdk.dir=$ANDROID_HOME" > local.properties
 
+      # Chaquopy build 需要特定 Python 版本（避免系统 python3 与内置 pip 不兼容）
+      - name: Setup Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
         with:

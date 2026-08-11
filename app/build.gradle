@@ -19,6 +19,8 @@ android {
 
         // Chaquopy Python 配置（嵌入在 android.defaultConfig 内）
         python {
+            // 显式指定 build Python，避免系统默认 python3 与 Chaquopy 12 内置 pip 兼容性问题
+            buildPython "python3.10"
             pip {
                 install "fastapi==0.115.0"
                 install "uvicorn[standard]==0.30.6"
