@@ -1,10 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">GitHub 加速</string>
-    <!-- 占位参数：1=局域网 IP, 2=端口, 3=ABI -->
-    <string name="status_template">📡 电脑访问：http://%1$s:%2$d/ · ABI: %3$s</string>
-    <!-- Python 服务启动失败时的提示 -->
-    <string name="server_error">⚠️ Python 服务启动失败: %1$s</string>
-    <!-- Python 初始化失败（完整错误 + 设备信息） -->
-    <string name="python_error">⚠️ Python 初始化失败\n\n设备 ABI: %1$s\n\n%2$s\n\n错误详情已保存到应用数据目录 ghproxy_crash.log，请反馈给开发者。</string>
+    <!-- 占位参数：1=局域网 IP, 2=端口 -->
+    <string name="status_template">📡 电脑访问：http://%1$s:%2$d/ · 手机内：http://127.0.0.1:%2$d/</string>
+    <!-- 服务启动失败时的提示 -->
+    <string name="server_error">⚠️ 服务启动失败: %1$s</string>
 </resources>
