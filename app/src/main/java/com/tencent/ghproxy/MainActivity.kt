@@ -10,17 +10,15 @@ import android.webkit.WebViewClient
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
-import com.chaquo.python.Python
 import java.net.Inet4Address
 import java.net.NetworkInterface
 
 /**
  * 主界面：
- *   - 顶部状态栏：设备 ABI + 局域网 IP + 端口（或 Python 启动错误）
- *   - WebView：加载本地 Python 代理服务首页 http://127.0.0.1:8080/
+ *   - 顶部状态栏：设备局域网 IP + 端口（电脑访问用）
+ *   - WebView：加载本地代理服务首页 http://127.0.0.1:8080/
  *
- * Python 由 App.onCreate 初始化（主线程）；此处仅后台线程启动 uvicorn 服务。
- * 启动失败会在状态栏显示错误而非闪退。
+ * 代理服务为纯 Kotlin（ProxyServer），无任何 native 库，启动即用。
  */
 class MainActivity : AppCompatActivity() {
 
@@ -28,6 +26,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusBar: TextView
     private val baseUrl = "http://127.0.0.1:8080"
     private val mainHandler = Handler(Looper.getMainLooper())
+    private var server: ProxyServer? = null
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -37,18 +36,9 @@ class MainActivity : AppCompatActivity() {
         statusBar = findViewById(R.id.statusBar)
         webView = findViewById(R.id.webView)
 
-        // Python 初始化是否成功？
-        val pyError = App.pythonStartError
-        if (pyError != null) {
-            // Python 启动失败：展示错误（替代闪退）
-            statusBar.text = getString(R.string.python_error, App.deviceAbi, pyError)
-            return  // 不加载 WebView
-        }
-
-        // 顶部状态栏：ABI + 局域网 IP + 端口
+        // 顶部状态栏：局域网 IP + 端口
         val lanIp = getLocalIpv4() ?: "127.0.0.1"
-        val port = 8080
-        statusBar.text = getString(R.string.status_template, lanIp, port, App.deviceAbi)
+        statusBar.text = getString(R.string.status_template, lanIp, 8080)
 
         // WebView 配置
         webView.settings.apply {
@@ -60,48 +50,45 @@ class MainActivity : AppCompatActivity() {
         webView.setBackgroundColor(ContextCompat.getColor(this, R.color.bg))
         webView.webViewClient = WebViewClient()
 
-        // 后台线程启动 uvicorn（阻塞式），失败时状态栏提示
-        startPythonServer()
-    }
-
-    private fun startPythonServer() {
+        // 后台线程启动代理服务（阻塞式 HTTP server）
         Thread {
             try {
-                Python.getInstance().getModule("app_main").callAttr("start_server")
+                val s = ProxyServer(8080)
+                server = s
+                s.start(NanoHTTPD_SOCKET_READ_TIMEOUT, false)
+                mainHandler.post { loadHome() }
             } catch (t: Throwable) {
                 t.printStackTrace()
-                val err = t.message ?: t.javaClass.simpleName
                 mainHandler.post {
-                    statusBar.text = getString(R.string.server_error, err)
+                    statusBar.text = getString(R.string.server_error, t.message ?: "unknown")
                 }
             }
         }.apply {
             name = "ghproxy-server"
             start()
         }
-        loadHomeWithRetry()
     }
 
-    private fun loadHomeWithRetry(retryLeft: Int = 20) {
+    private fun loadHome() {
         webView.loadUrl(baseUrl)
+        // 若 WebView 加载失败，重试几次
         webView.postDelayed({
-            if (retryLeft > 0 && (webView.url == null || webView.url == "about:blank")) {
-                loadHomeWithRetry(retryLeft - 1)
+            if (webView.url == null || webView.url == "about:blank") {
+                webView.loadUrl(baseUrl)
             }
-        }, 3000)
+        }, 2000)
     }
 
     override fun onBackPressed() {
-        if (webView.canGoBack()) {
-            webView.goBack()
-        } else {
-            super.onBackPressed()
-        }
+        if (webView.canGoBack()) webView.goBack() else super.onBackPressed()
     }
 
-    /**
-     * 枚举所有网络接口，返回第一个可用的 IPv4（Wi-Fi 优先）。
-     */
+    override fun onDestroy() {
+        try { server?.stop() } catch (_: Exception) {}
+        super.onDestroy()
+    }
+
+    /** 枚举网络接口，返回第一个可用 IPv4（Wi-Fi 优先） */
     private fun getLocalIpv4(): String? {
         val interfaces = NetworkInterface.getNetworkInterfaces() ?: return null
         var fallback: String? = null
@@ -111,21 +98,21 @@ class MainActivity : AppCompatActivity() {
                 val name = ni.name.lowercase()
                 if (name.startsWith("wlan") || name.startsWith("wifi")) {
                     for (addr in ni.inetAddresses) {
-                        if (addr is Inet4Address && !addr.isLoopbackAddress) {
-                            return addr.hostAddress
-                        }
+                        if (addr is Inet4Address && !addr.isLoopbackAddress) return addr.hostAddress
                     }
                 }
                 if (fallback == null) {
                     for (addr in ni.inetAddresses) {
-                        if (addr is Inet4Address && !addr.isLoopbackAddress) {
-                            fallback = addr.hostAddress
-                        }
+                        if (addr is Inet4Address && !addr.isLoopbackAddress) fallback = addr.hostAddress
                     }
                 }
             } catch (_: Exception) {
             }
         }
         return fallback
+    }
+
+    companion object {
+        private const val NanoHTTPD_SOCKET_READ_TIMEOUT = 5000
     }
 }
