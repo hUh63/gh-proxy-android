@@ -1,13 +1,10 @@
 // Top-level build file
-// Chaquopy 12.0 用 buildscript + classpath 语法（最稳）
 buildscript {
     repositories {
         google()
         mavenCentral()
-        maven { url 'https://chaquo.com/maven' }
     }
     dependencies {
         classpath 'com.android.tools.build:gradle:8.5.2'
-        classpath 'com.chaquo.python:gradle:12.0.0'
     }
 }
