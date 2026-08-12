@@ -12,7 +12,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -24,22 +24,12 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      # ubuntu-latest 已预装 Android SDK（ANDROID_HOME=/usr/local/lib/android/sdk）
-      # Chaquopy 插件依赖 local.properties 指向 SDK 路径
-      - name: Create local.properties
-        run: echo "sdk.dir=$ANDROID_HOME" > local.properties
-
-      # Chaquopy build 需要特定 Python 版本（避免系统 python3 与内置 pip 不兼容）
-      - name: Setup Python 3.10
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-
+      # ubuntu-latest 已预装 Android SDK，ANDROID_HOME 自动可用
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: '8.7'
-          cache-disabled: true    # GitHub 缓存服务不稳定时避免反复告警
+          cache-disabled: true
 
       - name: Build APK (release)
         env:
