@@ -1,8 +1,8 @@
-# Add project specific ProGuard rules here.
-# By default, the flags in this file are appended to flags specified
-# in proguard-android-optimize.txt.
-
-# Chaquopy: keep Python classes that may be referenced from Java/Kotlin
--keep class com.chaquo.python.** { *; }
+# Keep NanoHTTPD / OkHttp
+-keep class fi.iki.elonen.** { *; }
+-dontwarn fi.iki.elonen.**
+-keep class okhttp3.** { *; }
+-keep class okio.** { *; }
+-dontwarn okhttp3.**
+-dontwarn okio.**
 -keep class com.tencent.ghproxy.** { *; }
--dontwarn com.chaquo.**
