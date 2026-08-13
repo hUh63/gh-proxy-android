@@ -330,5 +330,4 @@ class ProxyServer(port: Int = 8080) : NanoHTTPD(port) {
 
     private fun err(code: Int, msg: String): Response =
         newFixedLengthResponse(Status.lookup(code), "text/plain; charset=utf-8", msg)
-}g)
 }
