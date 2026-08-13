@@ -105,7 +105,7 @@ class MainActivity : AppCompatActivity() {
         // 后台线程启动代理服务（阻塞式 HTTP server）
         Thread {
             try {
-                val s = ProxyServer(8080)
+                val s = ProxyServer(8080, applicationContext)
                 server = s
                 s.start(5000, false)
                 mainHandler.post { loadHome() }
