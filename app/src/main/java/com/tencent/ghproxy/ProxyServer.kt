@@ -8,13 +8,18 @@ import fi.iki.elonen.NanoHTTPD.Response.Status
 import okhttp3.OkHttpClient
 import okhttp3.Request as OkRequest
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Dns
 import java.io.IOException
 import java.io.InputStream
+import java.net.ConnectException
+import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.net.ProxySelector
 import java.net.SocketAddress
+import java.net.SocketTimeoutException
 import java.net.URI
+import java.net.UnknownHostException
 import java.util.concurrent.TimeUnit
 import java.util.regex.Pattern
 
@@ -119,8 +124,9 @@ class ProxyServer(port: Int = 8080, private val context: Context? = null) : Nano
     ① 电脑与手机连<b>同一 Wi-Fi</b>，浏览器访问 <b>http://手机IP:8080</b><br>
     ② 或直接拼接前缀：<b>http://手机IP:8080</b>/https://github.com/...<br>
     ③ 支持断点续传，可用迅雷 / IDM / 浏览器直接下载。<br>
-    <b>⚠️ 若提示 DNS 解析失败</b>：App 会自动跟随手机代理（Clash 等），<br>
-    请确认 Clash 已开启（代理模式或 TUN 模式）后重试。
+    <b>💡 加速原理</b>：GitHub 链接走代理解析，下载流量切到 CDN 直连提速。<br>
+    <b>⚠️ 直连报错（无法连接/超时）</b>：大陆网络直连 GitHub 会被限速/阻断，<br>
+    建议开启 Clash（并打开「设置系统代理」开关）后使用；节点越稳速度越快。
   </div>
 </div>
 <footer>gh-proxy-android · Kotlin 原生 · MIT License</footer>
@@ -204,6 +210,56 @@ class ProxyServer(port: Int = 8080, private val context: Context? = null) : Nano
             "content-disposition", "content-range", "accept-ranges", "etag",
             "last-modified", "cache-control", "expires", "date", "location"
         )
+
+        /** 必须走代理的 GitHub 主域名（大陆 DNS 污染，直连解析不了） */
+        private val PROXY_HOSTS = setOf(
+            "github.com", "api.github.com", "codeload.github.com",
+            "raw.githubusercontent.com", "gist.github.com", "gist.githubusercontent.com",
+            "github.githubassets.com", "avatars.githubusercontent.com"
+        )
+
+        /** 下载 CDN 域名：能直连时走直连（绕开慢速代理节点，这才是加速的意义） */
+        private val CDN_HOSTS = setOf(
+            "objects.githubusercontent.com", "github-releases.githubusercontent.com",
+            "user-images.githubusercontent.com", "github-cloud.s3.amazonaws.com"
+        )
+    }
+
+    // CDN 能否直连（启动时异步探测；false=CDN 也走代理）
+    @Volatile
+    private var cdnDirectOk = false
+
+    // DoH 专用 client（目标是 IP/国内域名，无需自定义 DNS，避免递归）
+    private val dnsClient: OkHttpClient = OkHttpClient.Builder()
+        .connectTimeout(4, TimeUnit.SECONDS)
+        .readTimeout(4, TimeUnit.SECONDS)
+        .build()
+
+    init {
+        // 异步探测 CDN 直连可达性：仅检测到系统代理时才有分流意义
+        Thread {
+            cdnDirectOk = probeCdnDirect()
+        }.apply {
+            name = "cdn-probe"
+            isDaemon = true
+            start()
+        }
+    }
+
+    /** 直连探测 CDN（不经过代理）：TCP+TLS 能通即视为直连可用 */
+    private fun probeCdnDirect(): Boolean {
+        if (readSystemProxy() == null) return false
+        return try {
+            val probe = OkHttpClient.Builder()
+                .connectTimeout(4, TimeUnit.SECONDS)
+                .readTimeout(4, TimeUnit.SECONDS)
+                .proxy(Proxy.NO_PROXY) // 强制直连探测
+                .build()
+            probe.newCall(OkRequest.Builder().url("https://objects.githubusercontent.com/").head().build()).execute().close()
+            true
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private val client: OkHttpClient = OkHttpClient.Builder()
@@ -216,15 +272,82 @@ class ProxyServer(port: Int = 8080, private val context: Context? = null) : Nano
         // 关键：读取安卓系统代理（Clash/VPN 设置的全局代理）。
         // OkHttp 默认不读系统代理，导致开了 Clash 也直连、DNS 被污染而解析失败。
         .proxySelector(systemProxySelector())
+        // 关键：自定义 DNS。系统 DNS 可能被污染（解析失败）或被 Clash fake-ip
+        // 劫持（返回 198.18.x.x 假 IP，直连必失败）。这里过滤 fake-ip，
+        // 失败时用公共 DoH（阿里/腾讯）解析真实 IP。
+        .dns(customDns())
         .build()
 
     // ==================================================================
-    // 系统代理读取（Clash 等加速器设置的 HTTP 代理）
+    // 自定义 DNS：过滤 Clash fake-ip，失败时走公共 DoH
+    // ==================================================================
+    private fun customDns(): Dns = Dns { hostname ->
+        val sys = try {
+            Dns.SYSTEM.lookup(hostname)
+        } catch (_: UnknownHostException) {
+            emptyList()
+        }
+        val real = sys.filterNot { isFakeIp(it.hostAddress ?: "") }
+        if (real.isNotEmpty()) {
+            real
+        } else {
+            dohLookup(hostname)?.let {
+                if (it.isNotEmpty()) it
+                else throw UnknownHostException(hostname)
+            } ?: throw UnknownHostException(hostname)
+        }
+    }
+
+    /** Clash fake-ip 默认网段 198.18.0.0/15 */
+    private fun isFakeIp(ip: String): Boolean =
+        ip.startsWith("198.18.") || ip.startsWith("198.19.")
+
+    /** 公共 DoH 解析（阿里/腾讯），返回真实 A 记录 IP */
+    private fun dohLookup(host: String): List<InetAddress>? {
+        val urls = listOf(
+            "https://223.5.5.5/resolve?name=$host&type=A",
+            "https://dns.tencent.com/dns-query?name=$host&type=A&ct=application/dns-json"
+        )
+        for (u in urls) {
+            try {
+                val resp = dnsClient.newCall(OkRequest.Builder().url(u).build()).execute()
+                val body = resp.body?.string()
+                resp.close()
+                if (body.isNullOrBlank()) continue
+                val obj = org.json.JSONObject(body)
+                val answers = obj.optJSONArray("Answer") ?: continue
+                val list = mutableListOf<InetAddress>()
+                for (i in 0 until answers.length()) {
+                    val a = answers.getJSONObject(i)
+                    if (a.optInt("type") == 1) { // A 记录
+                        val ip = a.optString("data")
+                        if (ip.isNotBlank()) list.add(InetAddress.getByName(ip))
+                    }
+                }
+                if (list.isNotEmpty()) return list
+            } catch (_: Exception) {
+                // 尝试下一个 DoH
+            }
+        }
+        return null
+    }
+
+    // ==================================================================
+    // 智能分流：GitHub 主域名走代理（防 DNS 污染），CDN 域名直连（提速）
     // ==================================================================
     private fun systemProxySelector(): ProxySelector = object : ProxySelector() {
         override fun select(uri: URI?): MutableList<Proxy> {
-            val p = readSystemProxy()
-            return mutableListOf(p ?: Proxy.NO_PROXY)
+            val host = uri?.host?.lowercase() ?: return mutableListOf(Proxy.NO_PROXY)
+            val sysProxy = readSystemProxy()
+            if (sysProxy == null) return mutableListOf(Proxy.NO_PROXY) // 无代理：全直连
+
+            val useProxy = when {
+                host in PROXY_HOSTS -> true                      // 主域名：必须走代理
+                host in CDN_HOSTS -> !cdnDirectOk                // CDN：直连可用则直连
+                host.endsWith(".githubusercontent.com") || host.endsWith(".github.com") -> true
+                else -> true                                     // 其他保守走代理
+            }
+            return mutableListOf(if (useProxy) sysProxy else Proxy.NO_PROXY)
         }
 
         override fun connectFailed(uri: URI?, sa: SocketAddress?, ioe: IOException?) {}
@@ -281,6 +404,14 @@ class ProxyServer(port: Int = 8080, private val context: Context? = null) : Nano
                     newFixedLengthResponse(Status.OK, "image/svg+xml", FAVICON)
                 else -> handleProxy(session)
             }
+        } catch (e: UnknownHostException) {
+            err(502, "DNS 解析失败：${e.message}\n当前网络无法访问 GitHub，请开启 Clash/代理后重试")
+        } catch (e: ConnectException) {
+            err(502, "连接失败：${e.message}\n当前网络无法直连 GitHub，请开启 Clash/代理后重试")
+        } catch (e: SocketTimeoutException) {
+            err(504, "连接超时：${e.message}\n网络过慢或代理节点不稳定，请换节点后重试")
+        } catch (e: IOException) {
+            err(502, "上游连接中断：${e.message}")
         } catch (e: Exception) {
             err(500, "server error: ${e.message}")
         }
