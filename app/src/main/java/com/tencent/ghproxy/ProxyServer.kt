@@ -109,7 +109,9 @@ class ProxyServer(port: Int = 8080) : NanoHTTPD(port) {
     <b>使用说明</b><br>
     ① 电脑与手机连<b>同一 Wi-Fi</b>，浏览器访问 <b>http://手机IP:8080</b><br>
     ② 或直接拼接前缀：<b>http://手机IP:8080</b>/https://github.com/...<br>
-    ③ 支持断点续传，可用迅雷 / IDM / 浏览器直接下载。
+    ③ 支持断点续传，可用迅雷 / IDM / 浏览器直接下载。<br>
+    <b>⚠️ 若提示 DNS 解析失败</b>：说明手机当前网络无法访问 GitHub，<br>
+    请开启加速器/代理（如 Clash 全局模式）或切换网络后重试。
   </div>
 </div>
 <footer>gh-proxy-android · Kotlin 原生 · MIT License</footer>
@@ -127,10 +129,27 @@ class ProxyServer(port: Int = 8080) : NanoHTTPD(port) {
   }
   function copyLink(){
     const t=document.getElementById('resultUrl').textContent;
-    if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(t); }
-    else { const ta=document.createElement('textarea'); ta.value=t; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); }
+    // WebView 非安全上下文没有 navigator.clipboard，用 execCommand 兼容方案
+    try {
+      const ta=document.createElement('textarea');
+      ta.value=t; ta.style.position='fixed'; ta.style.opacity='0';
+      document.body.appendChild(ta); ta.select(); ta.setSelectionRange(0,99999);
+      document.execCommand('copy'); document.body.removeChild(ta);
+      showTip('已复制到剪贴板');
+    } catch(e) {
+      if(navigator.clipboard && navigator.clipboard.writeText){
+        navigator.clipboard.writeText(t).then(()=>showTip('已复制'));
+      } else { showTip('复制失败，请长按链接手动复制'); }
+    }
   }
-  function download(){ window.open(document.getElementById('resultUrl').textContent,'_blank'); }
+  function download(){ window.location.href=document.getElementById('resultUrl').textContent; }
+  function showTip(m){
+    var d=document.createElement('div');
+    d.textContent=m;
+    d.style.cssText='position:fixed;left:50%;bottom:60px;transform:translateX(-50%);background:#fff;color:#0d1117;padding:8px 16px;border-radius:20px;font-size:13px;z-index:99;';
+    document.body.appendChild(d);
+    setTimeout(function(){d.remove();},1500);
+  }
   document.getElementById('go').onclick=generate;
   document.getElementById('url').addEventListener('keydown',e=>{ if(e.key==='Enter') generate(); });
 </script>
