@@ -593,19 +593,20 @@ class ProxyServer(port: Int = 8080, private val context: Context? = null) : Nano
         }
 
         // ---------- 重定向 ----------
+        // 与浏览器行为一致（也是原版 gh-proxy 行为）：
+        //   - Location 是 GitHub 链接 → 302 给客户端，客户端续走本代理
+        //   - Location 是外部链接（CDN 等）→ 302 直接给客户端直连，
+        //     客户端直连 CDN 通常比手机中转快（浏览器直连加速站实测 1MB/s+）
+        // 不再服务端跟随外部 302——那是负优化（手机再转一层 CDN 流量）。
         if (resp.isRedirect) {
             val loc = resp.header("Location")
             val statusCode = resp.code
             resp.close()
             if (loc != null) {
-                if (checkUrl(loc)) {
-                    return newFixedLengthResponse(Status.lookup(statusCode), null, null).apply {
-                        addHeader("Location", "/$loc")
-                        addHeader("Access-Control-Allow-Origin", "*")
-                    }
+                return newFixedLengthResponse(Status.lookup(statusCode), null, null).apply {
+                    addHeader("Location", if (checkUrl(loc)) "/$loc" else loc)
+                    addHeader("Access-Control-Allow-Origin", "*")
                 }
-                if (redirectsLeft <= 0) return err(502, "Too many redirects.")
-                return forward(session, loc, redirectsLeft - 1)
             }
         }
 
