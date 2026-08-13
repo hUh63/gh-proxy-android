@@ -37,13 +37,11 @@ MIT（参考 [hunshcn/gh-proxy](https://github.com/hunshcn/gh-proxy)）
 
 ## 📝 版本历史
 
-### v1.0（2026-08-13）
-- ✨ **加速站上游模式（默认开启）**：GitHub 主域名请求自动通过公共加速站
-  （gh-proxy.com 等海外中转）转发，绕开大陆对 GitHub 直连的限速/阻断，
-  速度通常提升 10-100 倍；首页可一键切换「通过加速站 / 直连 GitHub」
-- ✨ **自定义 DNS（DoH 兜底）**：绕过 DNS 污染与 Clash fake-ip（198.18.x.x），
-  修复开梯子时报 `Failed to connect to github.com/198.18.0.6:443`
-- ✨ **智能分流**：直连模式下 GitHub 主域名走代理，CDN 域名可直连时直连
-- 🐛 修复首页「复制」/「直接下载」按钮无反应
-- 🐛 定长响应透传 Content-Length，修复系统下载器 Http Data Error
-- 🏷️ 版本号统一为 1.0（应用名与应用内版本号一致）
+### v1.0（2026-08-14）
+- 🐛 **修复加速站模式 0KB/s**：外部重定向（CDN 302）改为直接交给客户端直连，
+  与浏览器行为一致（实测浏览器直连加速站 1MB/s，此前 App 服务端跟随 CDN 导致卡死）
+- 🐛 加速站拒绝网页链接时返回中文指引
+- ✨ 加速站上游模式（默认开启）：GitHub 请求经公共加速站（gh-proxy.com 等）海外中转
+- ✨ 自定义 DNS（DoH 兜底）：绕过 DNS 污染与 Clash fake-ip
+- ✨ 智能分流 + 定长响应（修复下载器 Http Data Error）
+- 🏷️ 版本号统一为 1.0
