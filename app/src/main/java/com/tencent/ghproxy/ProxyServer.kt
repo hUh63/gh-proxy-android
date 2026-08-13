@@ -663,5 +663,4 @@ class ProxyServer(port: Int = 8080, private val context: Context? = null) : Nano
 
     private fun err(code: Int, msg: String): Response =
         newFixedLengthResponse(Status.lookup(code) ?: Status.INTERNAL_ERROR, "text/plain; charset=utf-8", msg)
-}in; charset=utf-8", msg)
 }
