@@ -571,6 +571,27 @@ class ProxyServer(port: Int = 8080, private val context: Context? = null) : Nano
 
         val resp = client.newCall(rb.build()).execute()
 
+        // ---------- 加速站拒绝类错误（4xx）----------
+        // 公共加速站只允许文件下载，拒绝网页内容（仓库主页/releases 页面等），
+        // 此时给出中文指引而不是透传英文报错
+        if (useAccel && resp.code in 400..499) {
+            val msg = try {
+                resp.body?.string()?.take(1024) ?: ""
+            } catch (_: Exception) {
+                ""
+            }
+            resp.close()
+            val friendly = if (msg.contains("not allowed", ignoreCase = true) ||
+                msg.contains("downloads only", ignoreCase = true)) {
+                "加速站拒绝了该链接：仅支持文件下载，不支持网页内容。\n" +
+                    "请粘贴具体文件链接（如 .../releases/download/xxx.apk 或 .../archive/xxx.zip），\n" +
+                    "不要粘贴仓库主页或 releases 页面链接。"
+            } else {
+                "加速站返回错误 ${resp.code}：${msg.ifBlank { "无详情" }}"
+            }
+            return err(502, friendly)
+        }
+
         // ---------- 重定向 ----------
         if (resp.isRedirect) {
             val loc = resp.header("Location")
