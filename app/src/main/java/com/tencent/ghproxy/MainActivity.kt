@@ -17,7 +17,7 @@ import java.net.Inet4Address
 import java.net.NetworkInterface
 
 /**
- * 主界面（v1.1.1 诊断版）：
+ * 主界面（v1.0）：
  *   - 顶部状态栏显示：应用版本 / Android 版本 / 设备型号 / 局域网 IP / 端口
  *   - WebView 加载本地代理服务首页 http://127.0.0.1:8080/
  *   - 任何启动异常都会显示在屏幕上（不闪退），并写入 files/ghproxy_crash.log
@@ -89,6 +89,18 @@ class MainActivity : AppCompatActivity() {
         }
         webView.setBackgroundColor(ContextCompat.getColor(this, R.color.bg))
         webView.webViewClient = WebViewClient()
+
+        // 下载监听：直接下载按钮/链接导航到文件时，交给系统浏览器或下载器
+        webView.setDownloadListener { url, _: String?, _: String?, _: String?, _: Long ->
+            try {
+                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(intent)
+            } catch (_: Exception) {
+                // 无可用浏览器时退回 WebView 内加载
+                webView.loadUrl(url)
+            }
+        }
 
         // 后台线程启动代理服务（阻塞式 HTTP server）
         Thread {
