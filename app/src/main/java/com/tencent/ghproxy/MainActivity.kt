@@ -1,24 +1,28 @@
 package com.tencent.ghproxy
 
 import android.annotation.SuppressLint
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import java.io.File
 import java.net.Inet4Address
 import java.net.NetworkInterface
 
 /**
- * 主界面：
- *   - 顶部状态栏：设备局域网 IP + 端口（电脑访问用）
- *   - WebView：加载本地代理服务首页 http://127.0.0.1:8080/
+ * 主界面（v1.1.1 诊断版）：
+ *   - 顶部状态栏显示：应用版本 / Android 版本 / 设备型号 / 局域网 IP / 端口
+ *   - WebView 加载本地代理服务首页 http://127.0.0.1:8080/
+ *   - 任何启动异常都会显示在屏幕上（不闪退），并写入 files/ghproxy_crash.log
  *
- * 代理服务为纯 Kotlin（ProxyServer），无任何 native 库，启动即用。
+ * 本应用为纯 Kotlin（NanoHTTPD + OkHttp），无任何 native 库。
  */
 class MainActivity : AppCompatActivity() {
 
@@ -28,17 +32,53 @@ class MainActivity : AppCompatActivity() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var server: ProxyServer? = null
 
-    @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        try {
+            installCrashHandler()
+            initUi()
+        } catch (t: Throwable) {
+            // 任何启动异常：显示错误而非闪退
+            showFatalError(t)
+        }
+    }
+
+    /** 全局崩溃捕获：写入 files/ghproxy_crash.log（下次启动可读取展示） */
+    private fun installCrashHandler() {
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            try {
+                val trace = Log.getStackTraceString(throwable)
+                File(filesDir, "ghproxy_crash.log").writeText(
+                    "时间: ${System.currentTimeMillis()}\n线程: ${thread.name}\n$trace"
+                )
+            } catch (_: Exception) {
+            }
+            Log.e("GHProxy", "未捕获异常", throwable)
+        }
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun initUi() {
         setContentView(R.layout.activity_main)
 
         statusBar = findViewById(R.id.statusBar)
         webView = findViewById(R.id.webView)
 
-        // 顶部状态栏：局域网 IP + 端口
+        // 顶部状态栏：版本 / Android / 设备 / IP（全部可见，便于诊断）
         val lanIp = getLocalIpv4() ?: "127.0.0.1"
-        statusBar.text = getString(R.string.status_template, lanIp, 8080)
+        val info = "v${BuildConfig.VERSION_NAME} · Android ${Build.VERSION.RELEASE} · ${Build.MODEL}"
+        statusBar.text = getString(R.string.status_template, info, lanIp, 8080)
+
+        // 读取上次崩溃日志（如有）追加显示
+        val crash = try {
+            val f = File(filesDir, "ghproxy_crash.log")
+            if (f.exists()) f.readText() else null
+        } catch (_: Exception) {
+            null
+        }
+        if (crash != null && crash.isNotBlank()) {
+            statusBar.text = statusBar.text.toString() + "\n⚠️ 上次崩溃: " + crash.take(200)
+        }
 
         // WebView 配置
         webView.settings.apply {
@@ -55,7 +95,7 @@ class MainActivity : AppCompatActivity() {
             try {
                 val s = ProxyServer(8080)
                 server = s
-                s.start(NanoHTTPD_SOCKET_READ_TIMEOUT, false)
+                s.start(5000, false)
                 mainHandler.post { loadHome() }
             } catch (t: Throwable) {
                 t.printStackTrace()
@@ -71,12 +111,32 @@ class MainActivity : AppCompatActivity() {
 
     private fun loadHome() {
         webView.loadUrl(baseUrl)
-        // 若 WebView 加载失败，重试几次
         webView.postDelayed({
             if (webView.url == null || webView.url == "about:blank") {
                 webView.loadUrl(baseUrl)
             }
         }, 2000)
+    }
+
+    /** 显示致命错误（替代闪退） */
+    private fun showFatalError(t: Throwable) {
+        try {
+            val trace = Log.getStackTraceString(t)
+            File(filesDir, "ghproxy_crash.log").writeText(trace)
+        } catch (_: Exception) {
+        }
+        val tv = TextView(this).apply {
+            text = "⚠️ 应用启动失败（已捕获，未闪退）\n\n" +
+                "应用: v${BuildConfig.VERSION_NAME}\n" +
+                "Android: ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})\n" +
+                "设备: ${Build.MANUFACTURER} ${Build.MODEL}\n\n" +
+                t.javaClass.simpleName + ": " + (t.message ?: "") + "\n\n" +
+                Log.getStackTraceString(t).take(2000)
+            textSize = 13f
+            setTextColor(0xFFF85149.toInt())
+            setPadding(24, 24, 24, 24)
+        }
+        setContentView(tv)
     }
 
     override fun onBackPressed() {
@@ -110,9 +170,5 @@ class MainActivity : AppCompatActivity() {
             }
         }
         return fallback
-    }
-
-    companion object {
-        private const val NanoHTTPD_SOCKET_READ_TIMEOUT = 5000
     }
 }
