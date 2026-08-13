@@ -1,11 +1,20 @@
 package com.tencent.ghproxy
 
+import android.content.Context
+import android.os.Build
+import android.provider.Settings
 import fi.iki.elonen.NanoHTTPD
 import fi.iki.elonen.NanoHTTPD.Response.Status
 import okhttp3.OkHttpClient
 import okhttp3.Request as OkRequest
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.IOException
 import java.io.InputStream
+import java.net.InetSocketAddress
+import java.net.Proxy
+import java.net.ProxySelector
+import java.net.SocketAddress
+import java.net.URI
 import java.util.concurrent.TimeUnit
 import java.util.regex.Pattern
 
@@ -20,7 +29,7 @@ import java.util.regex.Pattern
  *
  * 功能：URL 校验 / blob→raw / 302 跟随 / 流式转发 / Range 断点续传 / 大小限制
  */
-class ProxyServer(port: Int = 8080) : NanoHTTPD(port) {
+class ProxyServer(port: Int = 8080, private val context: Context? = null) : NanoHTTPD(port) {
 
     companion object {
         // ================= 首页 HTML（内嵌，无外部依赖） =================
@@ -110,8 +119,8 @@ class ProxyServer(port: Int = 8080) : NanoHTTPD(port) {
     ① 电脑与手机连<b>同一 Wi-Fi</b>，浏览器访问 <b>http://手机IP:8080</b><br>
     ② 或直接拼接前缀：<b>http://手机IP:8080</b>/https://github.com/...<br>
     ③ 支持断点续传，可用迅雷 / IDM / 浏览器直接下载。<br>
-    <b>⚠️ 若提示 DNS 解析失败</b>：说明手机当前网络无法访问 GitHub，<br>
-    请开启加速器/代理（如 Clash 全局模式）或切换网络后重试。
+    <b>⚠️ 若提示 DNS 解析失败</b>：App 会自动跟随手机代理（Clash 等），<br>
+    请确认 Clash 已开启（代理模式或 TUN 模式）后重试。
   </div>
 </div>
 <footer>gh-proxy-android · Kotlin 原生 · MIT License</footer>
@@ -204,7 +213,45 @@ class ProxyServer(port: Int = 8080) : NanoHTTPD(port) {
         .followRedirects(false)
         .followSslRedirects(false)
         .retryOnConnectionFailure(true)
+        // 关键：读取安卓系统代理（Clash/VPN 设置的全局代理）。
+        // OkHttp 默认不读系统代理，导致开了 Clash 也直连、DNS 被污染而解析失败。
+        .proxySelector(systemProxySelector())
         .build()
+
+    // ==================================================================
+    // 系统代理读取（Clash 等加速器设置的 HTTP 代理）
+    // ==================================================================
+    private fun systemProxySelector(): ProxySelector = object : ProxySelector() {
+        override fun select(uri: URI?): MutableList<Proxy> {
+            val p = readSystemProxy()
+            return mutableListOf(p ?: Proxy.NO_PROXY)
+        }
+
+        override fun connectFailed(uri: URI?, sa: SocketAddress?, ioe: IOException?) {}
+    }
+
+    private fun readSystemProxy(): Proxy? {
+        val ctx = context ?: return null
+        return try {
+            val s = if (Build.VERSION.SDK_INT >= 26) {
+                Settings.Global.getString(ctx.contentResolver, Settings.Global.HTTP_PROXY)
+            } else {
+                Settings.Secure.getString(ctx.contentResolver, Settings.Secure.HTTP_PROXY)
+            }
+            if (s.isNullOrBlank()) null
+            else {
+                val idx = s.lastIndexOf(':')
+                if (idx <= 0) return null
+                val host = s.substring(0, idx).trim()
+                val port = s.substring(idx + 1).trim().toIntOrNull()
+                if (host.isNotBlank() && port != null && port in 1..65535) {
+                    Proxy(Proxy.Type.HTTP, InetSocketAddress(host, port))
+                } else null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
 
     // ==================================================================
     // NanoHTTPD 入口
