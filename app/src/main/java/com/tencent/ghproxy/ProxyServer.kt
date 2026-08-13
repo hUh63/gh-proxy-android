@@ -508,7 +508,15 @@ class ProxyServer(port: Int = 8080, private val context: Context? = null) : Nano
                 resp.close()
             }
         }
-        val response = newChunkedResponse(Status.lookup(resp.code), resp.header("Content-Type"), wrapped)
+        // 优先定长响应（透传 Content-Length）：系统下载管理器对 chunked 支持差，
+        // 没有 Content-Length 会导致进度条异常/Http Data Error/无法断点续传。
+        // 仅当上游未提供 Content-Length 时才退化为 chunked。
+        val ct = resp.header("Content-Type")
+        val response = if (len != null) {
+            newFixedLengthResponse(Status.lookup(resp.code), ct, wrapped, len)
+        } else {
+            newChunkedResponse(Status.lookup(resp.code), ct, wrapped)
+        }
         EXTRA_RESPONSE_HEADERS.forEach { h ->
             resp.header(h)?.let { response.addHeader(h, it) }
         }
