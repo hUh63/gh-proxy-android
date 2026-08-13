@@ -34,3 +34,11 @@ gradle wrapper
 ## 📜 License
 
 MIT（参考 [hunshcn/gh-proxy](https://github.com/hunshcn/gh-proxy)）
+
+## 📝 版本历史
+
+### v1.0（2026-08-13）
+- 🐛 修复首页「复制」按钮无反应（WebView 非安全上下文无 clipboard API，改用 execCommand 兼容方案）
+- 🐛 修复首页「直接下载」按钮无反应（window.open 被 WebView 拦截，改为页内导航 + DownloadListener 交给系统下载器）
+- 🐛 首页增加 DNS 解析失败提示（说明需开启代理/切换网络）
+- 🏷️ 版本号统一为 1.0（应用名与应用内版本号一致）
