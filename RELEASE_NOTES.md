@@ -38,8 +38,11 @@ MIT（参考 [hunshcn/gh-proxy](https://github.com/hunshcn/gh-proxy)）
 ## 📝 版本历史
 
 ### v1.0（2026-08-13）
-- ✨ **自动跟随系统代理**：App 自动读取手机代理设置（Clash / VPN），
-  开着 Clash 即可正常解析 GitHub，修复 `Unable to resolve host` 报错
+- ✨ **自定义 DNS（DoH 兜底）**：绕过 DNS 污染与 Clash fake-ip（198.18.x.x），
+  修复开梯子时报 `Failed to connect to github.com/198.18.0.6:443`
+- ✨ **智能分流**：GitHub 主域名走代理，下载 CDN 域名（objects.githubusercontent.com 等）
+  探测到可直连时自动直连，绕开慢速代理节点实现真正加速
 - 🐛 修复首页「复制」按钮无反应（WebView 非安全上下文无 clipboard API，改用 execCommand 兼容方案）
 - 🐛 修复首页「直接下载」按钮无反应（window.open 被 WebView 拦截，改为页内导航 + DownloadListener 交给系统下载器）
+- 🐛 错误信息分类（DNS 失败/连接失败/超时分开提示，明确下一步操作）
 - 🏷️ 版本号统一为 1.0（应用名与应用内版本号一致）
