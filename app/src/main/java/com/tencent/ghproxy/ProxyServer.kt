@@ -1,8 +1,10 @@
 package com.tencent.ghproxy
 
 import fi.iki.elonen.NanoHTTPD
+import fi.iki.elonen.NanoHTTPD.Response.Status
 import okhttp3.OkHttpClient
 import okhttp3.Request as OkRequest
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.InputStream
 import java.util.concurrent.TimeUnit
 import java.util.regex.Pattern
@@ -198,10 +200,10 @@ class ProxyServer(port: Int = 8080) : NanoHTTPD(port) {
                     addHeader("Access-Control-Max-Age", "1728000")
                 }
                 session.uri == "/" -> {
-                    val q = session.queryParamsString
+                    val q = session.queryParameterString
                     if (q.startsWith("q=")) {
                         // git clone 支持：?q=github.com/xxx -> 301
-                        newFixedLengthResponse(Status.MOVED_PERMANENTLY, null, null).apply {
+                        newFixedLengthResponse(Status.REDIRECT, null, null).apply {
                             addHeader("Location", "/" + q.substring(2))
                         }
                     } else {
@@ -269,10 +271,11 @@ class ProxyServer(port: Int = 8080) : NanoHTTPD(port) {
         // ---------- 重定向 ----------
         if (resp.isRedirect) {
             val loc = resp.header("Location")
+            val statusCode = resp.code
             resp.close()
             if (loc != null) {
                 if (checkUrl(loc)) {
-                    return newFixedLengthResponse(Status.lookup(resp.code()), null, null).apply {
+                    return newFixedLengthResponse(Status.lookup(statusCode), null, null).apply {
                         addHeader("Location", "/$loc")
                         addHeader("Access-Control-Allow-Origin", "*")
                     }
@@ -296,14 +299,22 @@ class ProxyServer(port: Int = 8080) : NanoHTTPD(port) {
             resp.close()
             return err(502, "empty upstream body")
         }
-        val response = newChunkedResponse(Status.lookup(resp.code()), resp.header("Content-Type"), body.byteStream())
+        // 包装输入流：NanoHTTPD 消费/关闭流时同步关闭上游 OkHttp 连接
+        val upstream = body.byteStream()
+        val wrapped = object : InputStream() {
+            override fun read(): Int = upstream.read()
+            override fun read(b: ByteArray, off: Int, len: Int): Int = upstream.read(b, off, len)
+            override fun close() {
+                try { upstream.close() } catch (_: Exception) {}
+                resp.close()
+            }
+        }
+        val response = newChunkedResponse(Status.lookup(resp.code), resp.header("Content-Type"), wrapped)
         EXTRA_RESPONSE_HEADERS.forEach { h ->
             resp.header(h)?.let { response.addHeader(h, it) }
         }
         response.addHeader("Access-Control-Allow-Origin", "*")
         response.addHeader("Access-Control-Expose-Headers", "*")
-        // 流读完自动关闭上游连接
-        response.addCloseConnectionListener { resp.close() }
         return response
     }
 
@@ -319,4 +330,5 @@ class ProxyServer(port: Int = 8080) : NanoHTTPD(port) {
 
     private fun err(code: Int, msg: String): Response =
         newFixedLengthResponse(Status.lookup(code), "text/plain; charset=utf-8", msg)
+}g)
 }
