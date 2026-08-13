@@ -119,14 +119,23 @@ class ProxyServer(port: Int = 8080, private val context: Context? = null) : Nano
     <div class="example" onclick="fill(this)">项目文件：https://github.com/hunshcn/gh-proxy/blob/master/README.md</div>
     <div class="example" onclick="fill(this)">raw 直链：https://raw.githubusercontent.com/hunshcn/gh-proxy/master/README.md</div>
   </div>
+  <div class="card">
+    <label>上游模式（决定下载速度上限）</label>
+    <div class="result-actions">
+      <button class="btn secondary" id="mAccel" onclick="setMode('accel')">通过加速站（推荐）</button>
+      <button class="btn secondary" id="mDirect" onclick="setMode('direct')">直连 GitHub</button>
+    </div>
+    <div class="err" id="modeInfo" style="display:block;color:var(--green);margin-top:8px"></div>
+  </div>
   <div class="tips">
     <b>使用说明</b><br>
     ① 电脑与手机连<b>同一 Wi-Fi</b>，浏览器访问 <b>http://手机IP:8080</b><br>
     ② 或直接拼接前缀：<b>http://手机IP:8080</b>/https://github.com/...<br>
     ③ 支持断点续传，可用迅雷 / IDM / 浏览器直接下载。<br>
-    <b>💡 加速原理</b>：GitHub 链接走代理解析，下载流量切到 CDN 直连提速。<br>
-    <b>⚠️ 直连报错（无法连接/超时）</b>：大陆网络直连 GitHub 会被限速/阻断，<br>
-    建议开启 Clash（并打开「设置系统代理」开关）后使用；节点越稳速度越快。
+    <b>💡 推荐「通过加速站」</b>：海外服务器中转 + 国内 CDN 分发，<br>
+    绕开大陆对 GitHub 的直连限速，速度通常快 10-100 倍。<br>
+    <b>⚠️ 直连报错（无法连接/超时）</b>：说明当前网络直连 GitHub 被限速/阻断，<br>
+    请切换为「通过加速站」模式；加速站均不可用时再考虑开 Clash。
   </div>
 </div>
 <footer>gh-proxy-android · Kotlin 原生 · MIT License</footer>
@@ -165,6 +174,30 @@ class ProxyServer(port: Int = 8080, private val context: Context? = null) : Nano
     document.body.appendChild(d);
     setTimeout(function(){d.remove();},1500);
   }
+  function setMode(m){
+    fetch('/api/mode?set='+m).then(function(r){return r.json();}).then(function(d){
+      refreshMode();
+      showTip(m==='accel'?'已切换：通过加速站':'已切换：直连 GitHub');
+    }).catch(function(){ showTip('切换失败'); });
+  }
+  function refreshMode(){
+    fetch('/api/mode').then(function(r){return r.json();}).then(function(d){
+      var accelBtn=document.getElementById('mAccel'), directBtn=document.getElementById('mDirect');
+      accelBtn.style.borderColor = d.mode==='accel' ? 'var(--accent)' : 'var(--border)';
+      accelBtn.style.color = d.mode==='accel' ? '#fff' : '';
+      accelBtn.style.background = d.mode==='accel' ? 'var(--accent)' : 'transparent';
+      directBtn.style.borderColor = d.mode==='direct' ? 'var(--accent)' : 'var(--border)';
+      directBtn.style.color = d.mode==='direct' ? '#fff' : '';
+      directBtn.style.background = d.mode==='direct' ? 'var(--accent)' : 'transparent';
+      var info=document.getElementById('modeInfo');
+      if(d.mode==='accel'){
+        info.textContent = d.accel==='none' ? '⚠️ 加速站均不可用，将退回直连' : '当前：通过加速站（'+d.accel.replace('https://','')+'）';
+      } else {
+        info.textContent = '当前：直连 GitHub（受网络限制，慢/断属正常）';
+      }
+    }).catch(function(){});
+  }
+  refreshMode();
   document.getElementById('go').onclick=generate;
   document.getElementById('url').addEventListener('keydown',e=>{ if(e.key==='Enter') generate(); });
 </script>
@@ -223,11 +256,36 @@ class ProxyServer(port: Int = 8080, private val context: Context? = null) : Nano
             "objects.githubusercontent.com", "github-releases.githubusercontent.com",
             "user-images.githubusercontent.com", "github-cloud.s3.amazonaws.com"
         )
+
+        /** 公共 gh-proxy 加速站列表（海外中转，国内可达；App 上游可选用） */
+        private val ACCEL_HOSTS = listOf(
+            "https://gh-proxy.com",
+            "https://ghproxy.net",
+            "https://mirror.ghproxy.com",
+            "https://gh.llkk.cc"
+        )
     }
 
     // CDN 能否直连（启动时异步探测；false=CDN 也走代理）
     @Volatile
     private var cdnDirectOk = false
+
+    // 加速站模式：true=所有上游请求通过公共加速站中转（绕开大陆对 GitHub 的限速）
+    @Volatile
+    private var accelMode: Boolean = loadMode()
+
+    // 启动探测选中的可用加速站前缀；null=加速站都不可用
+    @Volatile
+    private var accelPrefix: String? = null
+
+    private fun loadMode(): Boolean =
+        context?.getSharedPreferences("ghproxy", Context.MODE_PRIVATE)
+            ?.getBoolean("accel", true) ?: true
+
+    private fun saveMode() {
+        context?.getSharedPreferences("ghproxy", Context.MODE_PRIVATE)
+            ?.edit()?.putBoolean("accel", accelMode)?.apply()
+    }
 
     // DoH 专用 client（目标是 IP/国内域名，无需自定义 DNS，避免递归）
     private val dnsClient: OkHttpClient = OkHttpClient.Builder()
@@ -244,6 +302,31 @@ class ProxyServer(port: Int = 8080, private val context: Context? = null) : Nano
             isDaemon = true
             start()
         }
+        // 异步探测可用的公共加速站（accel 模式下使用）
+        Thread {
+            accelPrefix = probeAccel()
+        }.apply {
+            name = "accel-probe"
+            isDaemon = true
+            start()
+        }
+    }
+
+    /** 探测可用的加速站：逐个 HEAD，第一个可达的作为上游前缀 */
+    private fun probeAccel(): String? {
+        val probe = OkHttpClient.Builder()
+            .connectTimeout(4, TimeUnit.SECONDS)
+            .readTimeout(4, TimeUnit.SECONDS)
+            .build()
+        for (host in ACCEL_HOSTS) {
+            try {
+                probe.newCall(OkRequest.Builder().url("$host/").head().build()).execute().close()
+                return host
+            } catch (_: Exception) {
+                // 试下一个
+            }
+        }
+        return null
     }
 
     /** 直连探测 CDN（不经过代理）：TCP+TLS 能通即视为直连可用 */
@@ -403,6 +486,7 @@ class ProxyServer(port: Int = 8080, private val context: Context? = null) : Nano
                 }
                 session.uri == "/favicon.ico" ->
                     newFixedLengthResponse(Status.OK, "image/svg+xml", FAVICON)
+                session.uri == "/api/mode" -> handleMode(session)
                 else -> handleProxy(session)
             }
         } catch (e: UnknownHostException) {
@@ -421,6 +505,20 @@ class ProxyServer(port: Int = 8080, private val context: Context? = null) : Nano
     // ==================================================================
     // 代理逻辑
     // ==================================================================
+    /** 上游模式查询/切换：GET /api/mode 或 /api/mode?set=accel|direct */
+    private fun handleMode(session: IHTTPSession): Response {
+        val q = session.queryParameterString ?: ""
+        if (q.startsWith("set=")) {
+            when (q.substring(4)) {
+                "accel" -> { accelMode = true; saveMode() }
+                "direct" -> { accelMode = false; saveMode() }
+            }
+        }
+        val mode = if (accelMode) "accel" else "direct"
+        val accel = if (accelMode) (accelPrefix ?: "none") else "-"
+        return newFixedLengthResponse(Status.OK, "application/json; charset=utf-8", "{\"mode\":\"$mode\",\"accel\":\"$accel\"}")
+    }
+
     private fun handleProxy(session: IHTTPSession): Response {
         var target = session.uri.removePrefix("/")
         if (!target.startsWith("http")) target = "https://$target"
@@ -447,9 +545,15 @@ class ProxyServer(port: Int = 8080, private val context: Context? = null) : Nano
      * 转发单个 URL。重定向时：
      *   - Location 仍是受支持的 GitHub 链接 → 302 给客户端继续走代理
      *   - 外部（objects.githubusercontent.com 等）→ 服务端跟随
+     * accel 模式下：上游统一走公共加速站（gh-proxy 格式：加速站前缀 + 完整 URL）
      */
     private fun forward(session: IHTTPSession, url: String, redirectsLeft: Int): Response {
-        val rb = OkRequest.Builder().url(url)
+        // 构造上游地址：accel 模式下 GitHub 主域名走加速站（海外中转），
+        // CDN 域名（objects.githubusercontent.com 等）加速站不支持，仍走直连/代理分流
+        val isCdnHost = try { URI(url).host?.lowercase() in CDN_HOSTS } catch (_: Exception) { false }
+        val useAccel = accelMode && accelPrefix != null && !isCdnHost
+        val upstreamUrl = if (useAccel) "$accelPrefix/$url" else url
+        val rb = OkRequest.Builder().url(upstreamUrl)
 
         // 透传请求头（Range / User-Agent / Accept 等）
         session.headers.forEach { (k, v) ->
