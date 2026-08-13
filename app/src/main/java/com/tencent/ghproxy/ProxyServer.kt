@@ -281,17 +281,18 @@ class ProxyServer(port: Int = 8080, private val context: Context? = null) : Nano
     // ==================================================================
     // 自定义 DNS：过滤 Clash fake-ip，失败时走公共 DoH
     // ==================================================================
-    private fun customDns(): Dns = Dns { hostname ->
-        val sys = try {
-            Dns.SYSTEM.lookup(hostname)
-        } catch (_: UnknownHostException) {
-            emptyList()
-        }
-        val real = sys.filterNot { isFakeIp(it.hostAddress ?: "") }
-        if (real.isNotEmpty()) {
-            real
-        } else {
-            dohLookup(hostname)?.let {
+    private fun customDns(): Dns = object : Dns {
+        override fun lookup(hostname: String): List<InetAddress> {
+            val sys = try {
+                Dns.SYSTEM.lookup(hostname)
+            } catch (_: UnknownHostException) {
+                emptyList()
+            }
+            val real = sys.filterNot { isFakeIp(it.hostAddress ?: "") }
+            if (real.isNotEmpty()) {
+                return real
+            }
+            return dohLookup(hostname)?.let {
                 if (it.isNotEmpty()) it
                 else throw UnknownHostException(hostname)
             } ?: throw UnknownHostException(hostname)
