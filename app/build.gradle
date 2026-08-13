@@ -19,8 +19,9 @@ android {
             versionNameSuffix "-debug"
         }
         release {
-            minifyEnabled true
-            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            // ⚠️ 必须关闭混淆！R8 全优化会移除 MainActivity/ProxyServer 导致
+            //    ClassNotFoundException 启动闪退。小工具应用无需混淆。
+            minifyEnabled false
             signingConfig signingConfigs.debug
         }
     }
