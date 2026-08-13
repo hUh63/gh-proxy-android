@@ -200,7 +200,8 @@ class ProxyServer(port: Int = 8080) : NanoHTTPD(port) {
                     addHeader("Access-Control-Max-Age", "1728000")
                 }
                 session.uri == "/" -> {
-                    val q = session.queryParameterString
+                    // NanoHTTPD 无 query 时 queryParameterString 为 null，必须判空
+                    val q = session.queryParameterString ?: ""
                     if (q.startsWith("q=")) {
                         // git clone 支持：?q=github.com/xxx -> 301
                         newFixedLengthResponse(Status.REDIRECT, null, null).apply {
